@@ -1,6 +1,7 @@
 from flask import Flask, request, render_template_string
 from datetime import datetime
 import os
+import json
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -18,33 +19,39 @@ scope = [
 sheet = None
 
 try:
-    creds = Credentials.from_service_account_file(
-        "credentials.json",
-        scopes=scope
-    )
+    # LOCAL MODE (your computer)
+    if os.path.exists("credentials.json"):
+        creds = Credentials.from_service_account_file(
+            "credentials.json",
+            scopes=scope
+        )
+    else:
+        # RENDER MODE (environment variable)
+        creds_json = json.loads(os.environ["GOOGLE_CREDENTIALS"])
+        creds = Credentials.from_service_account_info(creds_json, scopes=scope)
 
     client = gspread.authorize(creds)
-
-    # MUST match your Google Sheet name exactly
     sheet = client.open("Bookings").sheet1
 
     print("✅ Google Sheets connected")
 
 except Exception as e:
-    print("❌ Google Sheets error:", e)
+    print("❌ Google Sheets connection failed:", e)
 
 
 # =========================
-# SAVE FUNCTION
+# SAVE TO SHEETS
 # =========================
 def save_to_sheet(name, email, message):
-    if sheet:
-        try:
-            sheet.append_row([name, email, message, str(datetime.now())])
-        except Exception as e:
-            print("❌ Failed to write to sheet:", e)
-    else:
-        print("⚠️ Sheet not available. Data not saved.")
+    if not sheet:
+        print("⚠️ Sheet not initialized")
+        return
+
+    try:
+        sheet.append_row([name, email, message, str(datetime.now())])
+        print("✅ Saved to Google Sheets")
+    except Exception as e:
+        print("❌ Google Sheets write error:", e)
 
 
 # =========================
@@ -142,16 +149,28 @@ def home():
         save_to_sheet(name, email, message)
 
         return """
-        <h2 style='text-align:center;margin-top:100px;'>
-            Thanks! We received your request.
-        </h2>
+        <div style="height:100vh;display:flex;flex-direction:column;
+        justify-content:center;align-items:center;background:#0b1220;
+        color:white;font-family:Arial;text-align:center;">
+
+            <h2>Thanks! We received your request.</h2>
+            <p>We’ll get back to you soon.</p>
+
+            <a href="/" style="
+                margin-top:20px;
+                color:#3b82f6;
+                text-decoration:none;
+                font-weight:bold;">
+                ← Go back
+            </a>
+        </div>
         """
 
     return render_template_string(form_html)
 
 
 # =========================
-# RUN APP
+# RUN
 # =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
