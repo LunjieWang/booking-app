@@ -9,53 +9,40 @@ from google.oauth2.service_account import Credentials
 app = Flask(__name__)
 
 # =========================
-# GOOGLE SHEETS SETUP
+# GOOGLE SHEETS AUTH (ENV VAR)
 # =========================
 scope = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
 ]
 
-sheet = None
+# Read credentials from Render Environment Variable
+service_account_info = json.loads(os.environ["GOOGLE_CREDENTIALS"])
 
-try:
-    # LOCAL MODE (your computer)
-    if os.path.exists("credentials.json"):
-        creds = Credentials.from_service_account_file(
-            "credentials.json",
-            scopes=scope
-        )
-    else:
-        # RENDER MODE (environment variable)
-        creds_json = json.loads(os.environ["GOOGLE_CREDENTIALS"])
-        creds = Credentials.from_service_account_info(creds_json, scopes=scope)
+creds = Credentials.from_service_account_info(
+    service_account_info,
+    scopes=scope
+)
 
-    client = gspread.authorize(creds)
-    sheet = client.open("Bookings").sheet1
+client = gspread.authorize(creds)
 
-    print("✅ Google Sheets connected")
+# MUST match your Google Sheet name exactly
+sheet = client.open("Bookings").sheet1
 
-except Exception as e:
-    print("❌ Google Sheets connection failed:", e)
+print("✅ CONNECTED TO GOOGLE SHEETS")
 
 
 # =========================
-# SAVE TO SHEETS
+# SAVE FUNCTION
 # =========================
 def save_to_sheet(name, email, message):
-    if not sheet:
-        print("⚠️ Sheet not initialized")
-        return
-
-    try:
-        sheet.append_row([name, email, message, str(datetime.now())])
-        print("✅ Saved to Google Sheets")
-    except Exception as e:
-        print("❌ Google Sheets write error:", e)
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sheet.append_row([name, email, message, timestamp])
+    print("✅ WRITE SUCCESS")
 
 
 # =========================
-# FRONTEND
+# FRONTEND UI
 # =========================
 form_html = """
 <!DOCTYPE html>
@@ -67,45 +54,35 @@ form_html = """
             margin: 0;
             font-family: Arial;
             background: #0b1220;
-            color: #e5e7eb;
+            color: white;
             display: flex;
             justify-content: center;
             align-items: center;
             height: 100vh;
         }
-
         .card {
             background: #111827;
-            padding: 36px;
-            border-radius: 16px;
+            padding: 30px;
+            border-radius: 12px;
             width: 400px;
-            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
-            border: 1px solid #1f2937;
-            text-align: center;
         }
-
         input, textarea {
             width: 100%;
-            padding: 12px;
-            margin-top: 6px;
-            border-radius: 10px;
-            border: 1px solid #1f2937;
-            background: #0b1220;
-            color: white;
+            padding: 10px;
+            margin-top: 5px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+            border: none;
         }
-
         button {
             width: 100%;
-            padding: 12px;
-            margin-top: 10px;
-            border: none;
-            border-radius: 10px;
+            padding: 10px;
             background: #3b82f6;
             color: white;
-            font-weight: bold;
+            border: none;
+            border-radius: 8px;
             cursor: pointer;
         }
-
         button:hover {
             background: #2563eb;
         }
@@ -117,12 +94,17 @@ form_html = """
     <h2>Book Appointment</h2>
 
     <form method="POST">
-        <input name="name" placeholder="Name" required>
-        <input name="email" placeholder="Email" type="email" required>
-        <textarea name="message" placeholder="Message"></textarea>
+        <label>Name</label>
+        <input name="name" required>
+
+        <label>Email</label>
+        <input name="email" type="email" required>
+
+        <label>Message</label>
+        <textarea name="message"></textarea>
+
         <button type="submit">Submit</button>
     </form>
-
 </div>
 
 </body>
@@ -130,8 +112,31 @@ form_html = """
 """
 
 
+success_html = """
+<div style="height:100vh;display:flex;justify-content:center;align-items:center;
+background:#0b1220;color:white;font-family:Arial;text-align:center;">
+    <div>
+        <h2>✅ Booking Received</h2>
+        <p>We saved your request successfully.</p>
+
+        <a href="/" style="
+            display:inline-block;
+            margin-top:15px;
+            padding:10px 20px;
+            background:#3b82f6;
+            color:white;
+            text-decoration:none;
+            border-radius:8px;
+        ">
+            Back
+        </a>
+    </div>
+</div>
+"""
+
+
 # =========================
-# ROUTES
+# ROUTE
 # =========================
 @app.route("/", methods=["GET", "POST"])
 def home():
@@ -144,34 +149,20 @@ def home():
         print("Name:", name)
         print("Email:", email)
         print("Message:", message)
-        print("===================")
 
-        save_to_sheet(name, email, message)
+        try:
+            save_to_sheet(name, email, message)
+        except Exception as e:
+            print("❌ GOOGLE SHEETS ERROR:", repr(e))
 
-        return """
-        <div style="height:100vh;display:flex;flex-direction:column;
-        justify-content:center;align-items:center;background:#0b1220;
-        color:white;font-family:Arial;text-align:center;">
-
-            <h2>Thanks! We received your request.</h2>
-            <p>We’ll get back to you soon.</p>
-
-            <a href="/" style="
-                margin-top:20px;
-                color:#3b82f6;
-                text-decoration:none;
-                font-weight:bold;">
-                ← Go back
-            </a>
-        </div>
-        """
+        return success_html
 
     return render_template_string(form_html)
 
 
 # =========================
-# RUN
+# START APP (Render safe)
 # =========================
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=True)
